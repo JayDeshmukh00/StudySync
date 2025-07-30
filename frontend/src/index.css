@@ -1,3 +1,67 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+/* Add this to the end of your src/index.css file */
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-down {
+  animation: fadeInDown 1s ease-out forwards;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 1s ease-out forwards;
+}
+
+.animation-delay-500 {
+  animation-delay: 500ms;
+}
+
+/* In src/index.css */
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Funky Animated Background for Dark Mode */
+.dark body {
+    background-color: #000000;
+    background-image:
+        radial-gradient(at 10% 90%, hsl(210, 80%, 30%) 0px, transparent 50%),
+        radial-gradient(at 90% 10%, hsl(280, 75%, 40%) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, hsl(180, 80%, 50%) 0px, transparent 50%);
+    animation: gradient-flow 15s ease-in-out infinite;
+    background-size: 200% 200%;
+}
+
+@keyframes gradient-flow {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* Helper classes used in the JS component */
+.perspective-1000 { perspective: 1000px; }
+.transform-style-3d { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; }
