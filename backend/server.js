@@ -1,6 +1,6 @@
 // server.js
 
-// Import necessary packages
+// --- 1. IMPORTS ---
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -11,558 +11,291 @@ const pdf = require('pdf-parse');
 const Groq = require('groq-sdk');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const http = require('http');
+const { Server } = require("socket.io");
 
 require('dotenv').config();
 
-// --- Server Configuration ---
+// --- 2. SERVER & DATABASE CONFIGURATION ---
 const app = express();
-const PORT = process.env.PORT || 3001;
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "http://localhost:3000", // Your React app's URL
+        methods: ["GET", "POST"]
+    }
+});
 
-// --- Groq AI Client ---
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const JWT_SECRET = process.env.JWT_SECRET || 'your-default-jwt-secret-key';
 
-// --- Middleware ---
+// --- 3. MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// --- Database Connection ---
+// --- 4. DATABASE CONNECTION & SCHEMAS ---
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('Successfully connected to MongoDB.'))
     .catch(err => { console.error('Connection error', err); process.exit(1); });
 
-// --- Database Schemas and Models ---
-const userSchema = new mongoose.Schema({ name: { type: String, required: true }, email: { type: String, required: true, unique: true }, password: { type: String, required: true } });
-const sectionSchema = new mongoose.Schema({ day: Number, title: String, topic: String, explanation: String, keyPoints: [String], youtubeSearchQueries: [String], referralSearchQueries: [String], questions: [String], pyqs: [String], status: { type: String, default: 'pending' }, notes: { type: String, default: '' } });
-const studyPlanSchema = new mongoose.Schema({ userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, title: { type: String, required: true }, originalFileName: { type: String, required: true }, startDate: { type: Date, required: true }, endDate: { type: Date, required:true }, sections: [sectionSchema], createdAt: { type: Date, default: Date.now } });
-const assessmentResultSchema = new mongoose.Schema({ planId: { type: mongoose.Schema.Types.ObjectId, ref: 'StudyPlan', required: true }, sectionId: { type: mongoose.Schema.Types.ObjectId, required: true }, score: { type: Number, required: true }, totalQuestions: { type: Number, required: true }, takenAt: { type: Date, default: Date.now } });
-
-// NEW, IMPROVED SCHEMA:
-const flashcardSchema = new mongoose.Schema({
-    term: { type: String, required: true },
-    definition: { type: String, required: true },
-    example: { type: String } // Example is optional
-});
-const flashcardSetSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+const SectionSchema = new mongoose.Schema({
     topic: { type: String, required: true },
-    cards: [flashcardSchema],
+    explanation: { type: String, required: true },
+    duration: { type: Number, required: true },
+    completed: { type: Boolean, default: false }
+});
+
+const PlanSchema = new mongoose.Schema({
+    title: { type: String, required: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    sections: [SectionSchema],
     createdAt: { type: Date, default: Date.now }
 });
 
-const User = mongoose.model('User', userSchema);
-const StudyPlan = mongoose.model('StudyPlan', studyPlanSchema);
-const AssessmentResult = mongoose.model('AssessmentResult', assessmentResultSchema);
-const FlashcardSet = mongoose.model('FlashcardSet', flashcardSetSchema);
-
-// --- File Upload Handling (Multer) ---
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/'),
-    filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+// CORRECTED: User schema now uses email as the unique identifier.
+const UserSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
 });
-const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB file size limit
 
-// --- AI Helper Functions ---
-async function summarizePdfText(text) {
-    console.log("Starting summarization for large PDF text...");
-    const MAX_CHUNK_SIZE = 15000; // Increased chunk size for efficiency
-    const textChunks = [];
-    for (let i = 0; i < text.length; i += MAX_CHUNK_SIZE) {
-        textChunks.push(text.substring(i, i + MAX_CHUNK_SIZE));
-    }
+const User = mongoose.model('User', UserSchema);
+const Plan = mongoose.model('Plan', PlanSchema);
 
-    if (textChunks.length <= 1) {
-        console.log("Text is short, no summarization needed.");
-        return text;
-    }
-
-    console.log(`Splitting text into ${textChunks.length} chunks for summarization.`);
-    let summarizedChunks = [];
-
-    for (const chunk of textChunks) {
-        try {
-            const summaryCompletion = await groq.chat.completions.create({
-                messages: [{
-                    role: 'user',
-                    content: `Please provide a concise summary of the key educational topics, concepts, and main ideas from the following text. Text: """${chunk}"""`
-                }],
-                model: 'llama3-8b-8192',
-                temperature: 0.2,
-            });
-            summarizedChunks.push(summaryCompletion.choices[0]?.message?.content);
-        } catch (error) {
-            console.error("Error summarizing a chunk:", error);
-            summarizedChunks.push("[Chunk summary failed]");
-        }
-    }
-    
-    console.log("Finished summarizing all chunks.");
-    return `This is a coherent summary compiled from a larger document. The key topics are: \n${summarizedChunks.join('\n\n')}`;
-}
-
-async function getGroqStudyPlan(pdfSummary, startDate, endDate, fileName) {
-    console.log('Sending request to Groq API for study plan...');
-    const prompt = `
-        You are an expert learning assistant. Your task is to create a comprehensive, detailed, day-by-day study plan from ${startDate} to ${endDate}, based on the provided text summary from a book titled "${fileName}".
-        For each day, you MUST provide a rich and helpful set of resources. The response must be a valid JSON object.
-
-        **CRITICAL INSTRUCTIONS:**
-        1.  **Explanation Field:** The "explanation" for each day MUST be exceptionally detailed and at least 500 words long. It should be broken down into multiple paragraphs, explaining the core concepts in a clear, easy-to-understand manner.
-        2.  **Complete All Fields:** You MUST generate content for ALL fields in the JSON structure for every single day. No field should be an empty array or null.
-        3.  **PYQs Field:** For the "pyqs" (Previous Year Questions) field, if no specific previous year questions are known or applicable, you MUST generate 4-5 challenging, exam-style questions that are relevant to the day's topic and label them appropriately. DO NOT leave this field empty.
-        4.  **Search Queries:** For "youtubeSearchQueries" and "referralSearchQueries", provide 2-3 effective and concise search queries. Do NOT provide full URLs.
-        5.  **Key Points:** The "keyPoints" list must contain at least 7-8 crucial takeaways.
-
-        The output MUST be a valid JSON object with a single key "studyPlan" which is an array of objects.
-        Each object in the array represents a single day's plan and must have the exact following structure:
-        {
-          "day": <integer>,
-          "title": "<string>",
-          "topic": "<string>",
-          "explanation": "<string, min 500 words>",
-          "keyPoints": ["<array of at least 7 strings>"],
-          "youtubeSearchQueries": ["<array of 2-3 strings>"],
-          "referralSearchQueries": ["<array of 2-3 strings>"],
-          "questions": ["<array of 4-5 strings>"],
-          "pyqs": ["<array of 4-5 strings, NO EMPTY ARRAYS>"]
-        }
-        ---
-        PDF SUMMARY CONTENT:
-        ${pdfSummary.substring(0, 25000)} 
-        ---
-    `;
-    try {
-        const chatCompletion = await groq.chat.completions.create({
-            messages: [{ role: 'user', content: prompt }],
-            model: 'llama3-70b-8192',
-            temperature: 0.6,
-            max_tokens: 8000,
-            response_format: { type: "json_object" },
-        });
-        return chatCompletion.choices[0]?.message?.content;
-    } catch (error) {
-        console.error("Error calling Groq API for study plan:", error);
-        throw new Error("Failed to get study plan from AI service.");
-    }
-}
-
-async function getGroqAssessment(topic, explanation) {
-    console.log('Sending request to Groq API for assessment...');
-    const prompt = `
-        Based on the following topic and explanation, generate a multiple-choice quiz with 10 questions to test a user's understanding.
-        Topic: ${topic}
-        Explanation: ${explanation}
-        The output MUST be a valid JSON object with a single key "assessment" which is an array of 10 objects.
-        Each object must have keys: "question", "options" (an array of 4 strings), and "correctAnswer" (the string of the correct option). Ensure the correctAnswer is an exact match to one of the strings in the options array.
-    `;
-    try {
-        const chatCompletion = await groq.chat.completions.create({
-            messages: [{ role: 'user', content: prompt }],
-            model: 'llama3-70b-8192',
-            temperature: 0.7,
-            max_tokens: 4096,
-            response_format: { type: "json_object" },
-        });
-        return chatCompletion.choices[0]?.message?.content;
-    } catch (error) {
-        console.error("Error calling Groq API for assessment:", error);
-        throw new Error("Failed to get assessment from AI service.");
-    }
-}
-
-
-// REPLACE the old getGroqFlashcards function with this one
-async function getGroqFlashcards(topic) {
-    console.log('Sending request to Groq API for RICH flashcards...');
-    const prompt = `
-        You are a learning expert. Generate a set of 15 high-quality flashcards for the topic: "${topic}".
-        The output MUST be a valid JSON object with a single key "flashcards".
-        Each object in the "flashcards" array must have the following exact structure:
-        {
-          "term": "<string> - A concise keyword or concept.",
-          "definition": "<string> - A clear, detailed definition of the term.",
-          "example": "<string> - A short, practical code snippet or real-world example. If no example is relevant, provide a helpful analogy."
-        }
-        Ensure the content is accurate and educational.
-    `;
-    try {
-        const chatCompletion = await groq.chat.completions.create({
-            messages: [{ role: 'user', content: prompt }],
-            model: 'llama3-70b-8192',
-            temperature: 0.6,
-            max_tokens: 4096,
-            response_format: { type: "json_object" },
-        });
-        return chatCompletion.choices[0]?.message?.content;
-    } catch (error) {
-        console.error("Error calling Groq API for flashcards:", error);
-        throw new Error("Failed to get flashcards from AI service.");
-    }
-}
-
-// --- Authentication Middleware ---
-const auth = (req, res, next) => {
+// --- 5. AUTHENTICATION MIDDLEWARE ---
+const authMiddleware = (req, res, next) => {
     const token = req.header('x-auth-token');
-    if (!token) return res.status(401).json({ msg: 'No token, authorization denied' });
+    if (!token) {
+        return res.status(401).json({ message: 'No token, authorization denied' });
+    }
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded.user;
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = { id: decoded.id };
         next();
-    } catch (e) {
-        res.status(401).json({ msg: 'Token is not valid' });
+    } catch (err) {
+        res.status(401).json({ message: 'Token is not valid' });
     }
 };
 
-// --- API Routes ---
+// --- 6. FILE UPLOAD CONFIGURATION ---
+const upload = multer({ dest: 'uploads/' });
 
-// --- Auth Routes ---
+// --- 7. API ROUTES ---
+
+// User Signup
 app.post('/api/auth/signup', async (req, res) => {
+    // CORRECTED: Destructure name, email, and password, which the frontend is sending.
     const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+        console.log('Signup attempt failed: Missing name, email, or password.');
+        return res.status(400).json({ message: 'Please provide name, email, and password.' });
+    }
     try {
+        // Check if a user with this email already exists.
         let user = await User.findOne({ email });
         if (user) {
-            return res.status(400).json({ msg: 'User already exists' });
+            console.log(`Signup attempt failed: Email '${email}' already exists.`);
+            return res.status(400).json({ message: 'User with this email already exists' });
         }
         user = new User({ name, email, password });
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(password, salt);
         await user.save();
-        const payload = { user: { id: user.id } };
-        jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 36000 }, (err, token) => {
+        
+        console.log(`User '${name}' successfully registered with email '${email}'.`);
+
+        const payload = { id: user.id };
+        jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
             if (err) throw err;
             res.json({ token });
         });
     } catch (err) {
-        console.error(err.message);
+        console.error('An error occurred during signup:', err.message);
         res.status(500).send('Server error');
     }
 });
 
+// User Login
 app.post('/api/auth/login', async (req, res) => {
+    // CORRECTED: Destructure email and password.
     const { email, password } = req.body;
+    if (!email || !password) {
+        console.log('Login attempt failed: Missing email or password.');
+        return res.status(400).json({ message: 'Please provide both email and password.' });
+    }
     try {
-        let user = await User.findOne({ email });
+        // Find the user by email.
+        const user = await User.findOne({ email });
         if (!user) {
-            return res.status(400).json({ msg: 'Invalid credentials' });
+            console.log(`Login attempt failed: User with email '${email}' not found.`);
+            return res.status(400).json({ message: 'Invalid credentials' });
         }
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(400).json({ msg: 'Invalid credentials' });
+            console.log(`Login attempt failed: Incorrect password for user with email '${email}'.`);
+            return res.status(400).json({ message: 'Invalid credentials' });
         }
-        const payload = { user: { id: user.id } };
-        jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 36000 }, (err, token) => {
+        
+        console.log(`User '${user.name}' successfully logged in.`);
+
+        const payload = { id: user.id };
+        jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
             if (err) throw err;
             res.json({ token });
         });
     } catch (err) {
-        console.error(err.message);
+        console.error('An error occurred during login:', err.message);
         res.status(500).send('Server error');
     }
 });
 
-// --- Study Plan Routes ---
-app.get('/api/plans', auth, async (req, res) => {
-    try {
-        const plans = await StudyPlan.find({ userId: req.user.id }).sort({ createdAt: -1 });
-        res.status(200).json(plans);
-    } catch (error) {
-        res.status(500).json({ msg: 'Server error fetching plans.' });
+// PDF Upload and Plan Generation
+app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).send('No file uploaded.');
     }
-});
-
-app.post('/api/generate-plan', auth, upload.single('pdf'), async (req, res) => {
-    const { file } = req;
-    const { startDate, endDate } = req.body;
-    if (!file || !startDate || !endDate) return res.status(400).json({ msg: 'Missing required fields.' });
-
     try {
-        const dataBuffer = fs.readFileSync(file.path);
-        const pdfData = await pdf(dataBuffer);
-        const pdfSummary = await summarizePdfText(pdfData.text);
-        const aiResponseString = await getGroqStudyPlan(pdfSummary, startDate, endDate, file.originalname);
+        const dataBuffer = fs.readFileSync(req.file.path);
+        const data = await pdf(dataBuffer);
+        const textContent = data.text;
 
-        if (!aiResponseString || typeof aiResponseString !== 'string') {
-            throw new Error("AI service returned an invalid or empty response.");
-        }
-        
-        let aiResponseJson;
-        try {
-            aiResponseJson = JSON.parse(aiResponseString);
-        } catch (parseError) {
-            console.error("Failed to parse JSON from AI response:", aiResponseString);
-            throw new Error("The AI failed to generate a valid study plan in the correct format. Please try again.");
-        }
+        const prompt = `Based on the following text, create a detailed study plan. The output should be a JSON object with a "title" (string) and "sections" (array of objects). Each section object must have "topic" (string), "explanation" (string, a detailed breakdown of the topic), and "duration" (number, in minutes). The text is: "${textContent}"`;
 
-        let aiSections = aiResponseJson.studyPlan;
-        if (!aiSections || !Array.isArray(aiSections)) throw new Error("AI response was not in the expected format.");
-
-        aiSections = aiSections.map((section, index) => ({ ...section, day: index + 1 }));
-
-        const newPlan = new StudyPlan({
-            userId: req.user.id,
-            title: `${file.originalname.replace(/\.pdf$/i, '')}`,
-            originalFileName: file.filename,
-            startDate: new Date(startDate),
-            endDate: new Date(endDate),
-            sections: aiSections,
+        const completion = await groq.chat.completions.create({
+            messages: [{ role: 'user', content: prompt }],
+            model: 'llama3-8b-8192',
+            response_format: { type: "json_object" },
         });
-        const savedPlan = await newPlan.save();
-        res.status(201).json(savedPlan);
+
+        const planData = JSON.parse(completion.choices[0].message.content);
+        const newPlan = new Plan({
+            title: planData.title || req.file.originalname,
+            user: req.user.id,
+            sections: planData.sections
+        });
+        await newPlan.save();
+        res.status(201).json(newPlan);
     } catch (error) {
-        console.error('Error during plan generation:', error);
-        res.status(500).json({ msg: 'Server error: ' + error.message });
+        console.error('Error processing file:', error);
+        res.status(500).send('Error creating study plan.');
     } finally {
-        if (req.file && req.file.path) { fs.unlinkSync(req.file.path); }
+        fs.unlinkSync(req.file.path);
     }
 });
 
-app.patch('/api/plan/:planId/section/:sectionId', auth, async (req, res) => {
+// Fetch All Plans for a User
+app.get('/api/plans', authMiddleware, async (req, res) => {
     try {
-        const { planId, sectionId } = req.params;
-        const { status, notes } = req.body;
-
-        const plan = await StudyPlan.findOne({_id: planId, userId: req.user.id});
-        if (!plan) return res.status(404).json({ msg: 'Study plan not found.' });
-        
-        const section = plan.sections.id(sectionId);
-        if (!section) return res.status(404).json({ msg: 'Section not found.' });
-
-        if (status) section.status = status;
-        if (notes !== undefined) section.notes = notes;
-
-        await plan.save();
-        res.status(200).json(section);
-    } catch (error) {
-        console.error('Error updating section:', error);
-        res.status(500).json({ msg: 'Server error while updating section.' });
+        const plans = await Plan.find({ user: req.user.id }).sort({ createdAt: -1 });
+        res.json(plans);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
     }
 });
 
-app.post('/api/generate-flashcards', auth, async (req, res) => {
-    const { topic } = req.body;
-    if (!topic) return res.status(400).json({ msg: 'Topic is required.' });
-    try {
-        const flashcardsString = await getGroqFlashcards(topic);
-        const flashcardsJson = JSON.parse(flashcardsString);
-
-        const newSet = new FlashcardSet({
-            userId: req.user.id,
-            topic: topic,
-            cards: flashcardsJson.flashcards
-        });
-        await newSet.save();
-        res.status(201).json(newSet);
-    } catch (error) {
-        console.error('Error generating flashcards:', error);
-        res.status(500).json({ msg: 'Server error: ' + error.message });
-    }
-});
-
-// --- NEW FLASHCARD ROUTES ---
-// GET all flashcard sets for the logged-in user
-app.get('/api/flashcard-sets', auth, async (req, res) => {
-    try {
-        const sets = await FlashcardSet.find({ userId: req.user.id }).sort({ createdAt: -1 });
-        res.status(200).json(sets);
-    } catch (error) {
-        console.error('Error fetching flashcard sets:', error);
-        res.status(500).json({ msg: 'Server error fetching flashcard sets.' });
-    }
-});
-
-// DELETE a specific flashcard set
-app.delete('/api/flashcard-sets/:setId', auth, async (req, res) => {
-    try {
-        const { setId } = req.params;
-        const set = await FlashcardSet.findOneAndDelete({ _id: setId, userId: req.user.id });
-
-        if (!set) {
-            return res.status(404).json({ msg: 'Flashcard set not found or user not authorized.' });
-        }
-
-        res.status(200).json({ msg: 'Flashcard set deleted successfully.' });
-    } catch (error) {
-        console.error('Error deleting flashcard set:', error);
-        res.status(500).json({ msg: 'Server error deleting flashcard set.' });
-    }
-});
-
-app.get('/api/plan/:planId', auth, async (req, res) => {
-    try {
-        const plan = await StudyPlan.findOne({ _id: req.params.planId, userId: req.user.id });
-        if (!plan) return res.status(404).json({ msg: 'Plan not found.' });
-        res.status(200).json(plan);
-    } catch (error) {
-        res.status(500).json({ msg: 'Server error fetching plan.' });
-    }
-});
-
-app.delete('/api/plan/:planId', auth, async (req, res) => {
-    try {
-        const plan = await StudyPlan.findOneAndDelete({ _id: req.params.planId, userId: req.user.id });
-        if (!plan) return res.status(404).json({ msg: 'Plan not found.' });
-        await AssessmentResult.deleteMany({ planId: req.params.planId });
-        res.status(200).json({ msg: 'Plan deleted successfully.' });
-    } catch (error) {
-        console.error("Error deleting plan:", error);
-        res.status(500).json({ msg: 'Server error deleting plan.' });
-    }
-});
-
-app.post('/api/generate-assessment', auth, async (req, res) => {
+// Generate Assessment
+app.post('/api/generate-assessment', authMiddleware, async (req, res) => {
     const { topic, explanation } = req.body;
-    if (!topic || !explanation) return res.status(400).json({ msg: 'Topic and explanation are required.' });
     try {
-        const assessmentString = await getGroqAssessment(topic, explanation);
-        const assessmentJson = JSON.parse(assessmentString);
-        res.status(200).json(assessmentJson);
+        const prompt = `Create a 5-question multiple-choice quiz on the topic "${topic}". The explanation is: "${explanation}". Return a JSON object with an "assessment" key, which is an array of question objects. Each object must have "question" (string), "options" (array of 4 strings), and "correctAnswer" (string, one of the options).`;
+        const completion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: "llama3-8b-8192",
+            response_format: { type: "json_object" },
+        });
+        const quizData = JSON.parse(completion.choices[0].message.content);
+        res.json(quizData);
     } catch (error) {
         console.error('Error generating assessment:', error);
-        res.status(500).json({ msg: 'Server error: ' + error.message });
+        res.status(500).send('Failed to generate assessment');
     }
 });
 
-app.post('/api/submit-assessment', auth, async (req, res) => {
-    const { planId, sectionId, answers, questions } = req.body;
-    if (!planId || !sectionId || !answers || !questions) return res.status(400).json({ msg: 'Missing required fields.' });
 
-    try {
-        let score = 0;
-        questions.forEach((q, index) => {
-            if (q.correctAnswer.trim() === (answers[index] ? answers[index].trim() : "")) {
-                score++;
-            }
+// --- 8. REAL-TIME COLLABORATIVE LOGIC ---
+const rooms = {};
+
+io.on('connection', (socket) => {
+    socket.on('join-room', ({ roomId, userName }) => {
+        if (!rooms[roomId]) {
+            rooms[roomId] = {
+                users: {},
+                chatHistory: [],
+                pomodoroState: { mode: 'work', timeLeft: 25 * 60, isRunning: false },
+                whiteboardData: null
+            };
+        }
+        const otherUsers = Object.values(rooms[roomId].users);
+
+        rooms[roomId].users[socket.id] = { id: socket.id, name: userName };
+        socket.roomId = roomId;
+        socket.join(roomId);
+
+        socket.emit('all-users', otherUsers);
+        socket.emit('room-state', {
+            host: Object.keys(rooms[roomId].users)[0],
+            whiteboard: rooms[roomId].whiteboardData,
+            chatHistory: rooms[roomId].chatHistory,
+            pomodoroState: rooms[roomId].pomodoroState
         });
+    });
 
-        const result = new AssessmentResult({ planId, sectionId, score, totalQuestions: questions.length });
-        await result.save();
-        res.status(201).json({ score, totalQuestions: questions.length });
-    } catch (error) {
-        console.error('Error submitting assessment:', error);
-        res.status(500).json({ msg: 'Server error: ' + error.message });
-    }
-});
+    socket.on('sending-signal', payload => {
+        io.to(payload.userToSignal).emit('user-joined', { signal: payload.signal, callerID: payload.callerID, name: payload.name });
+    });
 
-app.get('/api/plan/:planId/section/:sectionId/download', auth, async (req, res) => {
-    try {
-        const { planId, sectionId } = req.params;
-        const plan = await StudyPlan.findOne({ _id: planId, userId: req.user.id });
-        if (!plan) return res.status(404).json({ msg: 'Study plan not found.' });
-        const section = plan.sections.id(sectionId);
-        if (!section) return res.status(404).json({ msg: 'Section not found.' });
+    socket.on('returning-signal', payload => {
+        io.to(payload.callerID).emit('receiving-returned-signal', { signal: payload.signal, id: socket.id });
+    });
 
-        let fileContent = `STUDY PLAN - DAY ${section.day}\n`;
-        fileContent += `=================================\n\n`;
-        fileContent += `TOPIC: ${section.title}\n`;
-        fileContent += `SUBJECT: ${section.topic}\n\n`;
-        fileContent += `--- DETAILED EXPLANATION ---\n${section.explanation}\n\n`;
-        fileContent += `--- KEY POINTS ---\n${section.keyPoints.map(p => `- ${p}`).join('\n')}\n\n`;
-        fileContent += `--- MY NOTES ---\n${section.notes || 'No notes taken.'}\n\n`;
-        fileContent += `--- PRACTICE QUESTIONS ---\n${section.questions.map((q, i) => `${i+1}. ${q}`).join('\n')}\n\n`;
-        fileContent += `--- PREVIOUS YEAR QUESTIONS ---\n${section.pyqs.map((q, i) => `${i+1}. ${q}`).join('\n')}\n\n`;
-        fileContent += `--- RESOURCES TO SEARCH ---\n`;
-        fileContent += `Youtube Queries: \n${section.youtubeSearchQueries.map(l => `- ${l}`).join('\n')}\n`;
-        fileContent += `Article Search Queries: \n${section.referralSearchQueries.map(l => `- ${l}`).join('\n')}\n`;
+    socket.on('send-chat-message', ({ roomId, message }) => {
+        if (rooms[roomId]) {
+            rooms[roomId].chatHistory.push(message);
+            socket.to(roomId).emit('receive-chat-message', message);
+        }
+    });
 
-        const fileName = `Day_${section.day}_${section.title.replace(/\s/g, '_')}.txt`;
-        res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
-        res.setHeader('Content-Type', 'text/plain');
-        res.send(fileContent);
+    // Added handler for request-chat-history to send chat history to client
+    socket.on('request-chat-history', (roomId) => {
+        if (rooms[roomId]) {
+            socket.emit('chat-history', rooms[roomId].chatHistory);
+        }
+    });
 
-    } catch (error) {
-        console.error('Error generating download:', error);
-        res.status(500).json({ msg: 'Server error while generating download.' });
-    }
-});
+    socket.on('sync-pomodoro', ({ roomId, newState }) => {
+        if (rooms[roomId]) {
+            rooms[roomId].pomodoroState = newState;
+            socket.to(roomId).emit('sync-pomodoro', newState);
+        }
+    });
 
-app.get('/api/analytics', auth, async (req, res) => {
-    try {
-        const results = await AssessmentResult.find().populate({
-            path: 'planId',
-            match: { userId: req.user.id }
-        }).sort({ takenAt: -1 });
-        res.status(200).json(results.filter(r => r.planId)); // Filter out results where plan doesn't belong to user
-    } catch (error) {
-        res.status(500).json({ msg: 'Server error fetching analytics data.' });
-    }
-});
+    socket.on('whiteboard-draw', (data) => {
+        if (rooms[data.roomId]) {
+            rooms[data.roomId].whiteboardData = data.data;
+            socket.to(data.roomId).emit('whiteboard-draw', data.data);
+        }
+    });
+    
+    socket.on('disconnect', () => {
+        const roomId = socket.roomId;
+        if (roomId && rooms[roomId]?.users[socket.id]) {
+            const userName = rooms[roomId].users[socket.id].name;
+            console.log(`${userName} disconnected from room ${roomId}`);
+            
+            delete rooms[roomId].users[socket.id];
+            socket.to(roomId).emit('user-left', { id: socket.id });
 
-app.get('/api/analytics/smart-review', auth, async (req, res) => {
-    try {
-        const recentResults = await AssessmentResult.find().populate({
-            path: 'planId',
-            match: { userId: req.user.id }
-        }).sort({ takenAt: -1 }).limit(50);
-
-        const topicsToReview = [];
-        const reviewedSectionIds = new Set();
-
-        for (const result of recentResults.filter(r => r.planId)) {
-            if ((result.score / result.totalQuestions) < 0.7) {
-                if (!reviewedSectionIds.has(result.sectionId.toString())) {
-                    const section = result.planId.sections.id(result.sectionId);
-                    if (section) {
-                        topicsToReview.push({
-                            planId: result.planId._id,
-                            sectionId: section._id,
-                            title: section.title,
-                            planTitle: result.planId.title
-                        });
-                        reviewedSectionIds.add(result.sectionId.toString());
-                    }
-                }
+            if (Object.keys(rooms[roomId].users).length === 0) {
+                console.log(`Room ${roomId} is empty, deleting.`);
+                delete rooms[roomId];
             }
-            if (topicsToReview.length >= 5) break;
         }
-        res.status(200).json(topicsToReview);
-    } catch (error) {
-        console.error("Error fetching smart review data:", error);
-        res.status(500).json({ msg: 'Server error fetching smart review data.' });
-    }
+    });
 });
 
-app.post('/api/chat', auth, async (req, res) => {
-    const { history } = req.body;
-    if (!history) return res.status(400).json({ msg: 'Chat history is required.' });
-
-    try {
-        const stream = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful and friendly study assistant. Answer questions clearly and concisely.'
-                },
-                ...history
-            ],
-            model: 'llama3-70b-8192',
-            stream: true,
-        });
-
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-
-        for await (const chunk of stream) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        }
-        res.end();
-
-    } catch (error) {
-        console.error("Error with Groq chat stream:", error);
-        if (!res.headersSent) {
-            res.status(500).json({ msg: 'Error processing chat request.' });
-        } else {
-            res.end();
-        }
-    }
-});
-
-// --- Server Start ---
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+// --- 9. START SERVER ---
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => console.log(`Server is running on http://localhost:${PORT}`));
