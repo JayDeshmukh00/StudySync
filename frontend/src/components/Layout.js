@@ -19,7 +19,7 @@ export const Header = ({ onToggleTheme, currentTheme, onHomeClick, onLogout, log
       </div>
     </header>
 );
-  
+ 
 export const Footer = () => (
     <footer className="bg-transparent mt-8">
       <div className="container mx-auto px-4 py-4 text-center text-gray-500">
@@ -29,7 +29,8 @@ export const Footer = () => (
 );
 
 export const Chatbot = () => {
-    const [isOpen, setIsOpen] = useState(false);
+    // **FIX**: Chatbot is now open by default
+    const [isOpen, setIsOpen] = useState(true);
     const [messages, setMessages] = useState([{ role: 'assistant', content: "Hello! How can I help you study today?" }]);
     const [input, setInput] = useState('');
     const [isResponding, setIsResponding] = useState(false);
@@ -89,7 +90,8 @@ export const Chatbot = () => {
     return (
         <div className="fixed bottom-5 right-5 z-50">
             {isOpen && (
-                <div className="w-80 h-96 bg-white/50 dark:bg-black/70 backdrop-blur-xl rounded-lg shadow-2xl flex flex-col border border-blue-800/30 mb-4 animate-fade-in">
+                // **FIX**: Increased width and height of the chatbot window
+                <div className="w-96 h-[500px] bg-white/50 dark:bg-black/70 backdrop-blur-xl rounded-lg shadow-2xl flex flex-col border border-blue-800/30 mb-4 animate-fade-in">
                     <header className="p-4 border-b border-gray-200 dark:border-gray-700 font-bold text-lg text-gray-800 dark:text-white">Study Assistant</header>
                     <div className="flex-1 p-4 overflow-y-auto">
                         {messages.map((msg, index) => (

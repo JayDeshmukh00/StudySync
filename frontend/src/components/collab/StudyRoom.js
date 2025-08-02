@@ -20,9 +20,6 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoOn, setIsVideoOn] = useState(true);
     const [mediaError, setMediaError] = useState(null);
-    const [isConnected, setIsConnected] = useState(false);
-    
-    // FIX: Use state to manage the local stream, which prevents race conditions.
     const [myStream, setMyStream] = useState(null);
 
     const socketRef = useRef();
@@ -30,11 +27,14 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
     const peersRef = useRef({});
     const screenTrackRef = useRef();
 
-    // Effect 1: This runs once to get the user's camera stream.
+    // Effect to get user media
     useEffect(() => {
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
                 setMyStream(stream);
+                if (myVideoRef.current) {
+                    myVideoRef.current.srcObject = stream;
+                }
             })
             .catch(err => {
                 console.error("getUserMedia error:", err);
@@ -42,13 +42,6 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
             });
     }, []);
     
-    // Effect 2: This attaches the stream to the video element only when both are ready.
-    useEffect(() => {
-        if (myStream && myVideoRef.current) {
-            myVideoRef.current.srcObject = myStream;
-        }
-    }, [myStream]);
-
     const createPeer = useCallback((userToSignal, callerID, stream, name) => {
         const peer = new Peer({ initiator: true, trickle: false, stream });
         peer.on('signal', signal => {
@@ -70,64 +63,51 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
         return peer;
     }, []);
 
-    // Effect 3: This handles all socket.io and peer connection logic, but waits for the stream.
+    // Effect to handle all socket and peer connections
     useEffect(() => {
-        // Guard clause: Don't connect until the user's stream is ready.
-        if (!myStream) {
-            return;
-        }
+        if (!myStream) return;
 
         socketRef.current = io.connect(SOCKET_SERVER_URL);
+        
+        socketRef.current.emit('join-room', { roomId, userName });
 
-        socketRef.current.on('connect', () => {
+        socketRef.current.on('all-users', (users) => {
             const self = { id: socketRef.current.id, name: userName };
-            setParticipants([self]);
-            setIsConnected(true);
-            socketRef.current.emit('join-room', { roomId, userName });
-
-            socketRef.current.on('all-users', (users) => {
-                const self = { id: socketRef.current.id, name: userName };
-                const otherUsers = users.filter(user => user.id !== socketRef.current.id);
-                
-                const newPeers = [];
-                otherUsers.forEach(user => {
-                    const peer = createPeer(user.id, socketRef.current.id, myStream, userName);
-                    peersRef.current[user.id] = { peer, name: user.name };
-                    newPeers.push({ peerID: user.id, peer, name: user.name });
-                });
-                setPeers(newPeers);
-                setParticipants([self, ...otherUsers]);
-            });
-
-            socketRef.current.on('user-joined', (payload) => {
-                if (payload.callerID === socketRef.current.id) return;
-                
-                const peer = addPeer(payload.signal, payload.callerID, myStream, payload.name);
-                peersRef.current[payload.callerID] = { peer, name: payload.name };
-                setPeers(prevPeers => [...prevPeers, { peerID: payload.callerID, peer, name: payload.name }]);
-                setParticipants(prev => {
-                    const participantMap = new Map(prev.map(p => [p.id, p]));
-                    participantMap.set(payload.callerID, { id: payload.callerID, name: payload.name });
-                    return Array.from(participantMap.values());
-                });
-            });
+            const otherUsers = users.filter(user => user.id !== socketRef.current.id);
             
-            socketRef.current.on('user-left', ({ id }) => {
-                if (peersRef.current[id]) {
-                    peersRef.current[id].peer.destroy();
-                    delete peersRef.current[id];
-                }
-                setPeers(prev => prev.filter(p => p.peerID !== id));
-                setParticipants(prev => prev.filter(p => p.id !== id));
+            const newPeers = [];
+            otherUsers.forEach(user => {
+                const peer = createPeer(user.id, socketRef.current.id, myStream, userName);
+                peersRef.current[user.id] = { peer, name: user.name };
+                newPeers.push({ peerID: user.id, peer, name: user.name });
             });
+            setPeers(newPeers);
+            setParticipants([self, ...otherUsers]);
+        });
 
-            socketRef.current.on('receiving-returned-signal', (payload) => peersRef.current[payload.id]?.peer.signal(payload.signal));
-            socketRef.current.on('new-host', setHostId);
-            socketRef.current.on('room-state', (roomState) => {
-                setHostId(roomState.host);
-                setInitialWhiteboardData(roomState.whiteboard || []);
-                setPomodoroState(roomState.pomodoroState || { mode: 'work', timeLeft: 25 * 60, isRunning: false });
-            });
+        socketRef.current.on('user-joined', (payload) => {
+            if (peersRef.current[payload.callerID]) return;
+            
+            const peer = addPeer(payload.signal, payload.callerID, myStream, payload.name);
+            peersRef.current[payload.callerID] = { peer, name: payload.name };
+            setPeers(prevPeers => [...prevPeers, { peerID: payload.callerID, peer, name: payload.name }]);
+            setParticipants(prev => [...prev, { id: payload.callerID, name: payload.name }]);
+        });
+        
+        socketRef.current.on('user-left', ({ id }) => {
+            if (peersRef.current[id]) {
+                peersRef.current[id].peer.destroy();
+                delete peersRef.current[id];
+            }
+            setPeers(prev => prev.filter(p => p.peerID !== id));
+            setParticipants(prev => prev.filter(p => p.id !== id));
+        });
+
+        socketRef.current.on('receiving-returned-signal', (payload) => peersRef.current[payload.id]?.peer.signal(payload.signal));
+        socketRef.current.on('room-state', (roomState) => {
+            setHostId(roomState.host);
+            setInitialWhiteboardData(roomState.whiteboard || []);
+            setPomodoroState(roomState.pomodoroState || { mode: 'work', timeLeft: 25 * 60, isRunning: false });
         });
         
         const currentPeers = peersRef.current;
@@ -142,16 +122,20 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
     const toggleAudio = () => {
         if (myStream) {
             const audioTrack = myStream.getAudioTracks()[0];
-            audioTrack.enabled = !audioTrack.enabled;
-            setIsAudioMuted(!audioTrack.enabled);
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                setIsAudioMuted(!audioTrack.enabled);
+            }
         }
     };
 
     const toggleVideo = () => {
         if (myStream && !isScreenSharing) {
             const videoTrack = myStream.getVideoTracks()[0];
-            videoTrack.enabled = !videoTrack.enabled;
-            setIsVideoOn(!videoTrack.enabled);
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                setIsVideoOn(!videoTrack.enabled);
+            }
         }
     };
 
@@ -172,7 +156,6 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
             })
             .catch(err => {
                 console.error("Screen share failed:", err);
-                alert("Could not start screen sharing. Please grant permission and try again.");
                 setIsScreenSharing(false);
             });
     };
@@ -189,10 +172,6 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
         screenTrackRef.current.stop();
         setIsScreenSharing(false);
         setActiveView('whiteboard');
-    };
-
-    const handleHostMute = (targetId) => {
-        socketRef.current.emit('host-mute-user', { roomId, targetId });
     };
 
     const handleCopyRoomId = () => {
@@ -213,16 +192,8 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
         );
     }
 
-    if (!isConnected) {
-        return (
-            <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-4 gap-4">
-                <p className="text-xl">Initializing camera and connecting...</p>
-            </div>
-        );
-    }
-
     return (
-        <div className="h-screen bg-black text-white flex flex-col p-4 gap-4 overflow-hidden">
+        <div className="h-screen max-h-screen bg-black text-white flex flex-col p-4 gap-4 overflow-hidden">
             <header className="flex-shrink-0 flex justify-between items-center bg-gray-900/50 p-3 rounded-lg border border-gray-700">
                 <h1 className="text-xl font-bold">Study Room: <span className="text-blue-400 font-mono">{roomId}</span></h1>
                 <div className="flex items-center gap-4">
@@ -237,7 +208,7 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
             </header>
 
             <div className="flex-grow grid grid-cols-12 gap-4 overflow-hidden min-h-0">
-                <aside className="col-span-2 flex flex-col gap-4 overflow-y-auto">
+                <aside className="col-span-2 flex flex-col gap-4 overflow-y-auto pr-2">
                     <section className="bg-gray-900/50 p-3 rounded-lg border border-gray-700 flex-shrink-0">
                         <h2 className="text-lg font-bold mb-3">Controls</h2>
                         <div className="flex justify-center gap-4">
@@ -258,18 +229,13 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
                                         <Icon path="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" className="w-5 h-5 text-gray-400 flex-shrink-0" />
                                         <span className="truncate">{p.name} {p.id === hostId && '(Host)'} {p.id === socketRef.current?.id && '(You)'}</span>
                                     </div>
-                                    {socketRef.current?.id === hostId && p.id !== hostId && (
-                                        <button onClick={() => handleHostMute(p.id)} title={`Mute ${p.name}`} className="p-1 rounded-full bg-red-800 hover:bg-red-700 flex-shrink-0">
-                                            <Icon path="M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25M12 18.75h-6a2.25 2.25 0 0 1-2.25-2.25v-9A2.25 2.25 0 0 1 6 5.25h6.75m-6.75 0H4.5" className="w-4 h-4" />
-                                        </button>
-                                    )}
                                 </div>
                             ))}
                         </div>
                     </section>
                 </aside>
 
-                <main className="col-span-7 flex flex-col gap-4">
+                <main className="col-span-7 flex flex-col gap-4 min-h-0">
                     <section className="bg-gray-900/50 p-3 rounded-lg border border-gray-700 flex-shrink-0 flex items-center justify-center gap-4">
                         <button onClick={() => setActiveView('whiteboard')} className={`font-bold py-2 px-4 rounded-lg transition-colors ${activeView === 'whiteboard' ? 'bg-blue-700 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}>Whiteboard</button>
                         {isScreenSharing ? (
@@ -282,30 +248,30 @@ export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
                             </button>
                         )}
                     </section>
-                    <section className="flex-grow bg-black/30 rounded-lg p-2 border border-gray-800">
+                    <section className="flex-grow bg-black/30 rounded-lg p-2 border border-gray-800 min-h-0">
                         {activeView === 'whiteboard' && <Whiteboard socket={socketRef.current} roomId={roomId} initialData={initialWhiteboardData} />}
                         {activeView === 'screen' && <div className="w-full h-full bg-black flex items-center justify-center rounded-lg"><p className="text-2xl text-gray-400">You are viewing a screen share.</p></div>}
                     </section>
                 </main>
 
-                <aside className="col-span-3 flex flex-col gap-4 overflow-hidden">
-                    <section className="flex-grow p-2 bg-gray-900/50 rounded-lg border border-gray-800 overflow-y-auto">
-                        <div className="grid grid-cols-1 gap-4">
-                            <div className="relative bg-gray-800 rounded-lg aspect-video shadow-md">
-                                <video ref={myVideoRef} muted autoPlay playsInline className="w-full h-full rounded-lg object-cover" />
-                                <div className="absolute bottom-0 left-0 bg-black/60 text-white text-xs px-2 py-1 rounded-br-lg rounded-tl-lg">
-                                    {userName} (You)
+                <aside className="col-span-3 flex flex-col gap-4 min-h-0">
+                    <section className="flex-grow bg-gray-900/50 rounded-lg border border-gray-800 overflow-hidden flex flex-col">
+                        <div className="p-2 overflow-y-auto">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="relative bg-gray-800 rounded-lg aspect-video shadow-md">
+                                    <video ref={myVideoRef} muted autoPlay playsInline className="w-full h-full rounded-lg object-cover" />
+                                    <div className="absolute bottom-0 left-0 bg-black/60 text-white text-xs px-2 py-1 rounded-br-lg rounded-tl-lg">
+                                        {userName} (You)
+                                    </div>
+                                    {!isVideoOn && !isScreenSharing && <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center rounded-lg"><Icon path="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 0 1-2.25-2.25v-9A2.25 2.25 0 0 1 4.5 5.25H12a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25Z" className="w-10 h-10 text-gray-500" /></div>}
                                 </div>
-                                {!isVideoOn && !isScreenSharing && <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center rounded-lg"><Icon path="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 0 1-2.25-2.25v-9A2.25 2.25 0 0 1 4.5 5.25H12a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25Z" className="w-10 h-10 text-gray-500" /></div>}
+                                {peers.map(({ peerID, peer, name }) => (
+                                    <Video key={peerID} peer={peer} name={name} />
+                                ))}
                             </div>
-                            {peers.map(({ peerID, peer, name }) => (
-                                <div key={peerID} className="relative bg-gray-800 rounded-lg aspect-video shadow-md">
-                                    <Video peer={peer} name={name} />
-                                </div>
-                            ))}
                         </div>
                     </section>
-                    <section className="flex-shrink-0">
+                    <section className="flex-shrink-0 min-h-0">
                         <Chat socket={socketRef.current} roomId={roomId} myName={userName} />
                     </section>
                 </aside>

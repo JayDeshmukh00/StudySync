@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Icon, Spinner } from './Icon';
 
@@ -14,11 +15,11 @@ export const UploadView = ({ onPlanGenerated, onBack }) => {
     setIsLoading(true);
     setError(null);
     const formData = new FormData();
-    formData.append('pdf', file);
+    formData.append('file', file);
     formData.append('startDate', startDate);
     formData.append('endDate', endDate);
     try {
-      const response = await fetch('http://localhost:3001/api/generate-plan', { 
+      const response = await fetch('http://localhost:3001/api/upload', { 
           method: 'POST', 
           body: formData,
           headers: { 'x-auth-token': localStorage.getItem('token') }

@@ -8,23 +8,18 @@ export const Chat = ({ socket, roomId, myName }) => {
 
     useEffect(() => {
         if (socket) {
-            // FIX: This handler will only be attached AFTER history is loaded.
             const messageHandler = (message) => {
                 setMessages(prev => [...prev, message]);
             };
 
             const historyHandler = (history) => {
                 setMessages(history || []);
-                // Now that history is loaded, we can safely listen for new messages.
-                socket.on('receive-chat-message', messageHandler);
             };
 
-            // 1. Listen for the one-time history event.
             socket.on('chat-history', historyHandler);
-            // 2. Request the history.
+            socket.on('receive-chat-message', messageHandler);
             socket.emit('request-chat-history', roomId);
 
-            // 3. Cleanup function.
             return () => {
                 socket.off('chat-history', historyHandler);
                 socket.off('receive-chat-message', messageHandler);
@@ -40,7 +35,6 @@ export const Chat = ({ socket, roomId, myName }) => {
         e.preventDefault();
         if (newMessage.trim() && socket) {
             const messageData = {
-                // SUGGESTION: Add a unique ID for the message itself for the key prop.
                 messageId: `${socket.id}-${Date.now()}`,
                 type: 'text',
                 id: socket.id,
@@ -48,18 +42,19 @@ export const Chat = ({ socket, roomId, myName }) => {
                 text: newMessage.trim(),
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             };
+            // Send the message to the server
             socket.emit('send-chat-message', { roomId, message: messageData });
-            // Also add the message to our own state immediately for a responsive feel.
+            
+            // Optimistically add the message to our own UI
             setMessages(prev => [...prev, messageData]);
             setNewMessage('');
         }
     };
 
     return (
-        <div className="h-full flex flex-col bg-gray-900/50 rounded-lg border border-gray-700">
+        <div className="h-full max-h-[40vh] flex flex-col bg-gray-900/50 rounded-lg border border-gray-700">
             <h3 className="text-lg font-bold p-3 flex-shrink-0 border-b border-gray-700">Chat</h3>
             <div className="flex-grow overflow-y-auto p-3 space-y-4">
-                {/* FIX: Use a unique and stable key instead of index. */}
                 {messages.map((msg) => (
                     <div key={msg.messageId || msg.timestamp} className={`flex flex-col ${msg.id === socket.id ? 'items-end' : 'items-start'}`}>
                         <div className={`px-3 py-2 rounded-lg max-w-xs shadow-md ${msg.id === socket.id ? 'bg-blue-800' : 'bg-gray-700'}`}>
