@@ -55,7 +55,7 @@ export const Dashboard = ({ plans, onSelectPlan, onCreateNew, onAnalytics, onFla
     useEffect(() => {
         const fetchReviewTopics = async () => {
             try {
-                const response = await fetch('http://localhost:3001/api/analytics/smart-review', {
+                const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/analytics/smart-review`, {
                     headers: { 'x-auth-token': localStorage.getItem('token') }
                 });
                 if (!response.ok) return;
@@ -76,7 +76,7 @@ export const Dashboard = ({ plans, onSelectPlan, onCreateNew, onAnalytics, onFla
 
     const confirmDelete = async () => {
         if (!planToDelete) return;
-        await fetch(`http://localhost:3001/api/plans/${planToDelete._id}`, {
+        await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/plans/${planToDelete._id}`, {
             method: 'DELETE',
             headers: { 'x-auth-token': localStorage.getItem('token') }
         });

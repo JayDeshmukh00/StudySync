@@ -19,8 +19,8 @@ export const UploadView = ({ onPlanGenerated, onBack }) => {
     formData.append('startDate', startDate);
     formData.append('endDate', endDate);
     try {
-      const response = await fetch('http://localhost:3001/api/upload', { 
-          method: 'POST', 
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/upload`, {
+          method: 'POST',
           body: formData,
           headers: { 'x-auth-token': localStorage.getItem('token') }
       });

@@ -7,7 +7,7 @@ import { Whiteboard } from './Whiteboard';
 import { PomodoroTimer } from './PomodoroTimer';
 import { Icon } from '../Icon';
 
-const SOCKET_SERVER_URL = "http://localhost:3001";
+const SOCKET_SERVER_URL = process.env.REACT_APP_API_URL || "http://localhost:3001";
 
 export const StudyRoom = ({ roomId, userName, onLeaveRoom }) => {
     const [peers, setPeers] = useState([]);

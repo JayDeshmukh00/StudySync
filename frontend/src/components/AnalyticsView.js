@@ -17,8 +17,8 @@ export const AnalyticsView = ({ onBack }) => {
                 const token = localStorage.getItem('token');
                 // Fetch both plans and results in parallel for efficiency
                 const [plansResponse, resultsResponse] = await Promise.all([
-                    fetch('http://localhost:3001/api/plans', { headers: { 'x-auth-token': token } }),
-                    fetch('http://localhost:3001/api/analytics', { headers: { 'x-auth-token': token } })
+                    fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/plans`, { headers: { 'x-auth-token': token } }),
+                    fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/analytics`, { headers: { 'x-auth-token': token } })
                 ]);
                 
                 const plansData = await plansResponse.json();

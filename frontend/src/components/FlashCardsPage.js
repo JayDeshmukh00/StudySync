@@ -53,7 +53,7 @@ export const FlashcardsPage = ({ onBack }) => {
     useEffect(() => {
         const fetchSets = async () => {
             try {
-                const response = await fetch('http://localhost:3001/api/flashcard-sets', { headers: { 'x-auth-token': localStorage.getItem('token') } });
+                const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/flashcard-sets`, { headers: { 'x-auth-token': localStorage.getItem('token') } });
                 if (!response.ok) throw new Error('Failed to fetch sets.');
                 setSets(await response.json());
             } catch (err) { setError(err.message); }
@@ -78,7 +78,7 @@ export const FlashcardsPage = ({ onBack }) => {
         if (!topic.trim() || loading) return;
         setLoading(true); setError('');
         try {
-            const res = await fetch('http://localhost:3001/api/generate-flashcards', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') }, body: JSON.stringify({ topic }) });
+            const res = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/generate-flashcards`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') }, body: JSON.stringify({ topic }) });
             if (!res.ok) { const err = await res.json(); throw new Error(err.msg || 'Failed to generate.'); }
             const newSet = await res.json();
             setSets([newSet, ...sets]);
@@ -90,7 +90,7 @@ export const FlashcardsPage = ({ onBack }) => {
     const handleDelete = async (setId) => {
         if (!window.confirm('Delete this set forever?')) return;
         try {
-            await fetch(`http://localhost:3001/api/flashcard-sets/${setId}`, { method: 'DELETE', headers: { 'x-auth-token': localStorage.getItem('token') } });
+            await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/flashcard-sets/${setId}`, { method: 'DELETE', headers: { 'x-auth-token': localStorage.getItem('token') } });
             setSets(sets.filter(set => set._id !== setId));
         } catch (err) { setError(err.message); }
     };

@@ -29,7 +29,7 @@ const DayDetailView = ({ section, onUpdate, onStartAssessment, planId }) => {
                     <p className="text-lg text-gray-500 dark:text-gray-400 mt-1">{section.topic}</p>
                 </div>
                 <div className="flex items-center space-x-4">
-                    <a href={`http://localhost:3001/api/plan/${planId}/section/${section._id}/download`} download className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300 flex items-center"><Icon path="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" className="w-5 h-5 mr-2"/>Download</a>
+                    <a href={`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/plan/${planId}/section/${section._id}/download`} download className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300 flex items-center"><Icon path="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" className="w-5 h-5 mr-2"/>Download</a>
                         {section.status !== 'completed' && <button onClick={() => onUpdate({status: 'completed'})} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 flex items-center"><Icon path="M4.5 12.75l6 6 9-13.5" className="w-5 h-5 mr-2" />Mark Complete</button>}
                 </div>
             </div>
@@ -80,11 +80,11 @@ export const PlanView = ({ plan, setPlan, onBack, onStartAssessment, initialSect
         setSelectedSection(updatedSection);
 
         try {
-            await fetch(`http://localhost:3001/api/plan/${plan._id}/section/${selectedSection._id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
-                body: JSON.stringify(updatedSectionData),
-            });
+        await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/plan/${plan._id}/section/${selectedSection._id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+            body: JSON.stringify(updatedSectionData),
+        });
         } catch (error) {
             console.error("Failed to update section on server:", error);
             setPlan(originalPlan);

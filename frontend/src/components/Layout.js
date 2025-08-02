@@ -27,9 +27,22 @@ export const Footer = () => (
       </div>
     </footer>
 );
+const GlobalStyles = () => (
+    <style>{`
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fade-in 0.3s ease-out forwards;
+        }
+    `}</style>
+);
 
+
+// --- UPDATED CHATBOT COMPONENT ---
 export const Chatbot = () => {
-    // **FIX**: Chatbot is now open by default
+    // Chatbot is now open by default
     const [isOpen, setIsOpen] = useState(true);
     const [messages, setMessages] = useState([{ role: 'assistant', content: "Hello! How can I help you study today?" }]);
     const [input, setInput] = useState('');
@@ -49,13 +62,18 @@ export const Chatbot = () => {
         setIsResponding(true);
 
         try {
-            const response = await fetch('http://localhost:3001/api/chat', {
+            // FIX: Using the environment variable directly in the fetch call
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') },
+                // Send the last 10 messages to maintain context without being too large
                 body: JSON.stringify({ history: newMessages.slice(-10) }),
             });
 
-            if (!response.body) return;
+            if (!response.ok || !response.body) {
+                throw new Error('Failed to get a streaming response.');
+            }
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let assistantMessage = { role: 'assistant', content: '' };
@@ -88,36 +106,47 @@ export const Chatbot = () => {
     };
 
     return (
-        <div className="fixed bottom-5 right-5 z-50">
-            {isOpen && (
-                // **FIX**: Increased width and height of the chatbot window
-                <div className="w-96 h-[500px] bg-white/50 dark:bg-black/70 backdrop-blur-xl rounded-lg shadow-2xl flex flex-col border border-blue-800/30 mb-4 animate-fade-in">
-                    <header className="p-4 border-b border-gray-200 dark:border-gray-700 font-bold text-lg text-gray-800 dark:text-white">Study Assistant</header>
-                    <div className="flex-1 p-4 overflow-y-auto">
-                        {messages.map((msg, index) => (
-                            <div key={index} className={`mb-3 p-2 rounded-lg max-w-[85%] text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white ml-auto' : 'bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>
-                                {msg.content}
-                            </div>
-                        ))}
-                        <div ref={chatEndRef} />
+        <>
+            <GlobalStyles />
+            <div className="fixed bottom-5 right-5 z-50">
+                {isOpen && (
+                    // Increased width and height of the chatbot window
+                    <div className="w-[90vw] h-[70vh] sm:w-96 sm:h-[500px] bg-white/50 dark:bg-black/70 backdrop-blur-xl rounded-lg shadow-2xl flex flex-col border border-blue-800/30 mb-4 animate-fade-in">
+                        <header className="p-4 border-b border-gray-200 dark:border-gray-700 font-bold text-lg text-gray-800 dark:text-white">Study Assistant</header>
+                        <div className="flex-1 p-4 overflow-y-auto">
+                            {messages.map((msg, index) => (
+                                <div key={index} className={`mb-3 p-2 rounded-lg max-w-[85%] text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white ml-auto' : 'bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>
+                                    {msg.content}
+                                </div>
+                            ))}
+                            <div ref={chatEndRef} />
+                        </div>
+                        <div className="p-2 border-t border-gray-200 dark:border-gray-700 flex">
+                            <input
+                                type="text" value={input} onChange={(e) => setInput(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && !isResponding && handleSend()}
+                                placeholder="Ask a question..."
+                                className="flex-1 p-2 rounded-l-md bg-gray-100 dark:bg-gray-900 focus:outline-none text-gray-800 dark:text-gray-200"
+                                disabled={isResponding}
+                            />
+                            <button onClick={handleSend} disabled={isResponding} className="bg-blue-600 text-white px-4 rounded-r-md disabled:bg-blue-800 flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                                </svg>
+                            </button>
+                        </div>
                     </div>
-                    <div className="p-2 border-t border-gray-200 dark:border-gray-700 flex">
-                        <input
-                            type="text" value={input} onChange={(e) => setInput(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                            placeholder="Ask a question..."
-                            className="flex-1 p-2 rounded-l-md bg-gray-100 dark:bg-gray-900 focus:outline-none text-gray-800 dark:text-gray-200"
-                            disabled={isResponding}
-                        />
-                        <button onClick={handleSend} disabled={isResponding} className="bg-blue-600 text-white px-4 rounded-r-md disabled:bg-blue-800">
-                            <Icon path="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" className="w-5 h-5"/>
-                        </button>
-                    </div>
-                </div>
-            )}
-            <button onClick={() => setIsOpen(!isOpen)} className="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 shadow-lg">
-                <Icon path={isOpen ? "M6 18 18 6M6 6l12 12" : "M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-3.04 8.357-7.146 9.354a9.345 9.345 0 0 1-2.704 0C6.04 20.357 3 16.556 3 12s3.04-8.357 7.146-9.354a9.345 9.345 0 0 1 2.704 0C17.96 3.643 21 7.444 21 12Z"} className="w-8 h-8"/>
-            </button>
-        </div>
+                )}
+                <button onClick={() => setIsOpen(!isOpen)} className="bg-blue-600 hover:bg-blue-500 text-white rounded-full p-4 shadow-lg">
+                    {isOpen ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    ) : (
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    )}
+                </button>
+            </div>
+        </>
     );
 };

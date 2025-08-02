@@ -52,7 +52,7 @@ function App() {
         setIsLoading(true);
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch('http://localhost:3001/api/plans', {
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/plans`, {
                 headers: { 'x-auth-token': token }
             });
             if (!response.ok) throw new Error('Failed to fetch');
@@ -94,7 +94,7 @@ function App() {
     const handleStartAssessment = async (section) => {
         setIsLoading(true);
         try {
-            const response = await fetch('http://localhost:3001/api/generate-assessment', {
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/generate-assessment`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') },
                 body: JSON.stringify({ topic: section.topic, explanation: section.explanation }),
             });

@@ -5,6 +5,41 @@ const pdf = require('pdf-parse');
 const Groq = require('groq-sdk');
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+/**
+ * A robust function to call the Groq API with automatic retries.
+ * This handles transient errors and rate limits.
+ * @param {string} prompt The prompt to send to the AI.
+ * @param {number} dayNumber The day number for logging purposes.
+ * @param {number} maxRetries The maximum number of times to retry.
+ * @returns {Promise<object>} The parsed JSON content from the AI.
+ */
+const generateContentWithRetries = async (prompt, dayNumber, maxRetries = 3) => {
+    let attempt = 0;
+    while (attempt < maxRetries) {
+        try {
+            const completion = await groq.chat.completions.create({
+                messages: [{ role: 'user', content: prompt }],
+                model: 'llama3-8b-8192',
+                response_format: { type: "json_object" },
+            });
+            const content = completion.choices[0].message.content;
+            return JSON.parse(content); // Success
+        } catch (error) {
+            attempt++;
+            console.error(`Error generating content for Day ${dayNumber} (Attempt ${attempt}/${maxRetries}):`, error.message);
+            if (attempt >= maxRetries) {
+                // If all retries fail, throw the error to be caught by the main handler
+                throw error;
+            }
+            // Wait before retrying with exponential backoff (e.g., 2s, 4s, 8s)
+            const delay = Math.pow(2, attempt) * 1000;
+            console.log(`Retrying in ${delay / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+};
+
+
 exports.uploadAndGeneratePlan = async (req, res) => {
     if (!req.file) return res.status(400).json({ msg: 'No file uploaded.' });
     const { startDate, endDate } = req.body;
@@ -32,57 +67,57 @@ exports.uploadAndGeneratePlan = async (req, res) => {
             return textContent.substring(start, end);
         });
 
-        const sectionPromises = textChunks.map(async (chunk, index) => {
+        const generatedSections = [];
+        for (const [index, chunk] of textChunks.entries()) {
             const dayNumber = index + 1;
+            console.log(`Generating content for Day ${dayNumber}...`);
+            
+            // --- FIX: A more forceful and structured prompt ---
             const prompt = `
-                Analyze the provided text to create a study session for Day ${dayNumber}. Respond with a valid JSON object containing these exact keys:
+                You are an expert author tasked with writing a study guide chapter for Day ${dayNumber}.
+
+                **NON-NEGOTIABLE CONSTRAINTS:**
+                1.  **Identify Topic:** First, identify the core topic from the text segment below.
+                2.  **Generate Long-Form Content:** Write a comprehensive, detailed chapter about this topic.
+                3.  **MANDATORY LENGTH:** The "explanation" field **MUST** be a minimum of 1000 words. A short summary is a failure. To meet this length, you **MUST** structure your chapter with the following markdown headings: "## Introduction", "## Core Principle 1: [Name of Principle]", "## Core Principle 2: [Name of Principle]", "## Practical Applications", and "## Conclusion". Flesh out each section thoroughly.
+
+                **OUTPUT FORMAT:**
+                After authoring the chapter, provide your response as a single, valid JSON object with these exact keys:
                 - "day": ${dayNumber}
-                - "title": (string) A short, catchy title for the session.
-                - "topic": (string) The main topic covered.
-                - "explanation": (string) A very detailed, comprehensive explanation of the topic, at least 1000 words long.
-                - "keyPoints": (array of strings) At least 10 distinct key points.
-                - "youtubeSearchQueries": (array of strings) 4 effective YouTube search queries.
-                - "referralSearchQueries": (array of strings) 4 effective Google search queries.
-                - "questions": (array of strings) 5 thought-provoking questions.
-                - "pyqs": (array of strings) 5 exam-style "Previous Year Questions".
-                Text: "${chunk}"
+                - "title": (string) A short, catchy title for the study chapter.
+                - "topic": (string) The main topic you identified.
+                - "explanation": (string) The full 1000+ word study chapter you wrote, complete with markdown headings.
+                - "keyPoints": (array of strings) At least 10 distinct key points summarizing the chapter.
+                - "youtubeSearchQueries": (array of strings) 4 effective YouTube search queries for the topic.
+                - "referralSearchQueries": (array of strings) 4 effective Google search queries for the topic.
+                - "questions": (array of strings) 5 thought-provoking questions based on the chapter.
+                - "pyqs": (array of strings) 5 exam-style "Previous Year Questions" (PYQs) related to the topic.
+
+                **TEXT SEGMENT:**
+                "${chunk}"
             `;
             
             const fallbackSection = {
                 day: dayNumber,
                 title: `Topic for Day ${dayNumber}`,
                 topic: "Content Generation Failed",
-                explanation: "There was an error generating the detailed explanation for this topic. Please try generating the plan again.",
-                keyPoints: [],
-                youtubeSearchQueries: [],
-                referralSearchQueries: [],
-                questions: [],
-                pyqs: []
+                explanation: "There was an error generating the detailed explanation for this topic after multiple attempts. Please try generating the plan again.",
+                keyPoints: [], youtubeSearchQueries: [], referralSearchQueries: [], questions: [], pyqs: []
             };
 
             try {
-                const completion = await groq.chat.completions.create({
-                    messages: [{ role: 'user', content: prompt }],
-                    model: 'llama3-70b-8192',
-                    response_format: { type: "json_object" },
-                });
-                const content = completion.choices[0].message.content;
-                let parsedContent = JSON.parse(content);
-
+                const parsedContent = await generateContentWithRetries(prompt, dayNumber);
                 if (!parsedContent.explanation || !parsedContent.title || !parsedContent.topic) {
                     console.error(`Validation failed for Day ${dayNumber}: AI response was missing required fields.`);
-                    return fallbackSection;
+                    generatedSections.push(fallbackSection);
+                } else {
+                    generatedSections.push(parsedContent);
                 }
-                
-                return parsedContent;
-
             } catch (e) {
-                console.error(`Error generating content for Day ${dayNumber}:`, e);
-                return fallbackSection;
+                console.error(`Final failure to generate content for Day ${dayNumber}.`);
+                generatedSections.push(fallbackSection);
             }
-        });
-
-        const generatedSections = await Promise.all(sectionPromises);
+        }
 
         const newPlan = new Plan({
             title: req.file.originalname.replace('.pdf', ''),
@@ -166,4 +201,3 @@ exports.downloadSection = async (req, res) => {
         res.status(500).send('Server Error');
     }
 };
-

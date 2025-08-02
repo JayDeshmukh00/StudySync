@@ -11,8 +11,8 @@ export const AssessmentView = ({ questions, planId, sectionId, onSubmit }) => {
     const handleSubmitQuiz = async () => {
         setIsSubmitting(true);
         try {
-            const response = await fetch('http://localhost:3001/api/submit-assessment', { 
-                method: 'POST', 
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/submit-assessment`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') }, 
                 body: JSON.stringify({ planId, sectionId, answers, questions }), 
             });
