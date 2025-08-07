@@ -17,6 +17,17 @@ export const FeaturesPage = ({ onFeatureSelect }) => (
           description="Generate personalized study plans from your course materials."
           onClick={() => onFeatureSelect('dashboard')}
         />
+        {/* --- ADDED: Aura Reader Card --- */}
+        <FeatureCard
+          title="Aura Reader"
+          description="An interactive PDF reader with AI-powered highlighting and notes."
+          onClick={() => onFeatureSelect('auraReader')}
+        />
+        <FeatureCard
+          title="AI Study Buddy"
+          description="Get instant explanations and ask questions about your PDF content."
+          onClick={() => onFeatureSelect('dashboard')}
+        />
         <FeatureCard
           title="My Topic Calendar"
           description="Visualize your study schedule and track your progress."

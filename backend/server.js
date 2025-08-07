@@ -35,6 +35,8 @@ const analyticsRoutes = require('./src/routes/analytics.routes');
 const assessmentRoutes = require('./src/routes/assessment.routes');
 const chatRoutes = require('./src/routes/chat.routes');
 const flashcardRoutes = require('./src/routes/flashcard.routes');
+const buddyRoutes = require('./src/routes/buddy.js');
+const auraRoutes = require('./src/routes/aura.routes.js'); // <-- ADDED: Import Aura Reader routes
 
 // Define the base path for each route module
 app.use('/api/auth', authRoutes);
@@ -43,6 +45,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api', assessmentRoutes); // Handles /generate-assessment, /submit-assessment
 app.use('/api/chat', chatRoutes);
 app.use('/api', flashcardRoutes); // Handles /flashcard-sets, /generate-flashcards
+app.use('/api/buddy', buddyRoutes);
+app.use('/api/aura', auraRoutes); // <-- ADDED: Use Aura Reader routes
 
 // --- 6. START SERVER ---
 server.listen(PORT, () => console.log(`Server is running on http://localhost:${PORT}`));

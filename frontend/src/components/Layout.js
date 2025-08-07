@@ -42,8 +42,8 @@ const GlobalStyles = () => (
 
 // --- UPDATED CHATBOT COMPONENT ---
 export const Chatbot = () => {
-    // Chatbot is now open by default
-    const [isOpen, setIsOpen] = useState(true);
+    // --- FIXED: Chatbot is now closed by default ---
+    const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState([{ role: 'assistant', content: "Hello! How can I help you study today?" }]);
     const [input, setInput] = useState('');
     const [isResponding, setIsResponding] = useState(false);
@@ -62,11 +62,9 @@ export const Chatbot = () => {
         setIsResponding(true);
 
         try {
-            // FIX: Using the environment variable directly in the fetch call
             const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') },
-                // Send the last 10 messages to maintain context without being too large
                 body: JSON.stringify({ history: newMessages.slice(-10) }),
             });
 
@@ -110,7 +108,6 @@ export const Chatbot = () => {
             <GlobalStyles />
             <div className="fixed bottom-5 right-5 z-50">
                 {isOpen && (
-                    // Increased width and height of the chatbot window
                     <div className="w-[90vw] h-[70vh] sm:w-96 sm:h-[500px] bg-white/50 dark:bg-black/70 backdrop-blur-xl rounded-lg shadow-2xl flex flex-col border border-blue-800/30 mb-4 animate-fade-in">
                         <header className="p-4 border-b border-gray-200 dark:border-gray-700 font-bold text-lg text-gray-800 dark:text-white">Study Assistant</header>
                         <div className="flex-1 p-4 overflow-y-auto">

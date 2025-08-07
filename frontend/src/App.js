@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import process from 'process';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage, SignUpPage } from './components/Auth';
 import { FeaturesPage } from './components/Features';
@@ -16,11 +16,19 @@ import { Header, Footer, Chatbot } from './components/Layout';
 import { StudyLobby } from './components/collab/StudyLobby';
 import { StudyRoom } from './components/collab/StudyRoom';
 
+// --- ADDED: Import the new AuraReader component ---
+import AuraReader from './components/AuraReader/AuraReader';
+
+// --- Buddy Feature Imports ---
+import { BuddyProvider, useBuddy } from './context/BuddyContext';
+import BuddyControlPanel from './components/buddy/BuddyControlPanel';
+import HighlightHandler from './components/buddy/HighlightHandler';
+
 // These lines provide the necessary polyfills for browser environments
 window.Buffer = Buffer;
 window.process = process;
 
-function App() {
+function AppContent() {
     const [theme, setTheme] = useState('dark');
     const [view, setView] = useState('landing');
     const [plans, setPlans] = useState([]);
@@ -32,6 +40,8 @@ function App() {
     const [loggedIn, setLoggedIn] = useState(false);
     
     const [collabInfo, setCollabInfo] = useState({ roomId: null, userName: '' });
+    
+    const buddyContext = useBuddy();
 
     const handleLogin = useCallback(() => {
         setLoggedIn(true);
@@ -55,6 +65,10 @@ function App() {
             const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/plans`, {
                 headers: { 'x-auth-token': token }
             });
+            if (response.status === 401) {
+                // handleLogout(); // Assuming handleLogout is defined
+                return; 
+            }
             if (!response.ok) throw new Error('Failed to fetch');
             const data = await response.json();
             setPlans(data);
@@ -98,6 +112,10 @@ function App() {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'x-auth-token': localStorage.getItem('token') },
                 body: JSON.stringify({ topic: section.topic, explanation: section.explanation }),
             });
+            if (response.status === 401) {
+                handleLogout();
+                return;
+            }
             if (!response.ok) throw new Error('Failed to generate quiz');
             const data = await response.json();
             setAssessmentData({ questions: data.assessment, sectionId: section._id });
@@ -127,7 +145,14 @@ function App() {
             case 'features': return loggedIn ? <FeaturesPage onFeatureSelect={(feature) => setView(feature)} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
             case 'dashboard': return loggedIn ? <Dashboard plans={plans} onSelectPlan={handleViewPlan} onCreateNew={() => setView('upload')} onAnalytics={() => setView('analytics')} onFlashcards={() => setView('flashcards')} onDeletePlan={fetchPlans} onBack={() => setView('features')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
             case 'upload': return loggedIn ? <UploadView onPlanGenerated={handlePlanGenerated} onBack={() => setView('dashboard')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
-            case 'plan': return loggedIn ? <PlanView plan={currentPlan} setPlan={setCurrentPlan} onBack={handleBackToDashboard} onStartAssessment={handleStartAssessment} initialSectionId={initialSectionId} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
+            
+            case 'plan': 
+                return loggedIn ? (
+                    <HighlightHandler onHighlight={buddyContext.onHighlight}>
+                        <PlanView plan={currentPlan} setPlan={setCurrentPlan} onBack={handleBackToDashboard} onStartAssessment={handleStartAssessment} initialSectionId={initialSectionId} />
+                    </HighlightHandler>
+                ) : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
+
             case 'assessment': return loggedIn ? <AssessmentView questions={assessmentData.questions} planId={currentPlan._id} sectionId={assessmentData.sectionId} onSubmit={handleSubmitAssessment} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
             case 'result': return loggedIn ? <ResultView result={assessmentResult} onBack={handleBackToPlan} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
             case 'analytics': return loggedIn ? <AnalyticsView onBack={() => setView('dashboard')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
@@ -135,6 +160,9 @@ function App() {
             case 'flashcards': return loggedIn ? <FlashcardsPage onBack={() => setView('features')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
             case 'studysessions': return loggedIn ? <StudyLobby onJoinRoom={handleJoinRoom} onBack={() => setView('features')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
             case 'mindmap': return loggedIn ? <MindMapPage onBack={() => setView('features')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
+            
+            case 'auraReader': return loggedIn ? <AuraReader onBack={() => setView('features')} /> : <LoginPage onLoginSuccess={handleLogin} onSwitchToSignUp={() => setView('signup')} />;
+
             default: return <div>Loading...</div>;
         }
     };
@@ -149,7 +177,28 @@ function App() {
             </main>
             {showLayout && <Footer />}
             {showLayout && <Chatbot />}
+            
+            {(view === 'plan' || view === 'auraReader') && (
+                <BuddyControlPanel
+                    explanation={buddyContext.explanation}
+                    isSpeaking={buddyContext.isSpeaking}
+                    spokenText={buddyContext.spokenText}
+                    selectedLanguage={buddyContext.selectedLanguage}
+                    onSelectLanguage={buddyContext.onSelectLanguage}
+                    onReplayAudio={buddyContext.onReplayAudio}
+                    isListening={buddyContext.isListening}
+                    onToggleListen={buddyContext.onToggleListen}
+                />
+            )}
         </div>
+    );
+}
+
+function App() {
+    return (
+        <BuddyProvider>
+            <AppContent />
+        </BuddyProvider>
     );
 }
 
