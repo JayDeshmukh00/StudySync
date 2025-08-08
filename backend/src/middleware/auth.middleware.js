@@ -1,5 +1,3 @@
-// src/middleware/auth.middleware.js
-
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'your-default-jwt-secret-key';
 
@@ -20,8 +18,11 @@ const authMiddleware = (req, res, next) => {
     try {
         // Verify the token using the secret key
         const decoded = jwt.verify(token, JWT_SECRET);
-        // Attach the user payload (which contains the id) to the request object
-        req.user = { id: decoded.id };
+        
+        // --- IMPORTANT CORRECTION ---
+        // Your middleware needs to attach the 'user' object from the decoded token
+        req.user = decoded.user; 
+        
         // Proceed to the next middleware or route handler
         next();
     } catch (err) {
