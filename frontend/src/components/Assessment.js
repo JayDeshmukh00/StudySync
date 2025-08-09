@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Icon, Spinner } from './Icon';
+import { Spinner } from './Icon';
 
 export const AssessmentView = ({ questions, planId, sectionId, onSubmit }) => {
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);

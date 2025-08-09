@@ -61,12 +61,48 @@ export const FlashcardsPage = ({ onBack }) => {
         fetchSets();
     }, []);
 
+    const shuffleArray = (array) => [...array].sort(() => Math.random() - 0.5);
+
+    const handleSelectSet = (set, restart = false) => {
+        const cardsToStudy = restart && reviewLaterCards.length > 0 ? [...reviewLaterCards] : shuffleArray(set.cards);
+        setSelectedSet(set);
+        setShuffledCards(cardsToStudy);
+        setCurrentCardIndex(0);
+        setIsFlipped(false);
+        setKnownCards([]);
+        setReviewLaterCards([]);
+        setSessionFinished(false);
+    };
+
+    const handleNextCard = useCallback((isKnown) => {
+        const currentCard = shuffledCards[currentCardIndex];
+        if (isKnown) setKnownCards(prev => [...prev, currentCard]);
+        else setReviewLaterCards(prev => [...prev, currentCard]);
+        
+        setIsFlipped(false);
+        if (currentCardIndex < shuffledCards.length - 1) {
+            setCurrentCardIndex(prev => prev + 1);
+        } else {
+            setSessionFinished(true);
+        }
+    }, [currentCardIndex, shuffledCards]);
+
+    const handlePrevCard = useCallback(() => {
+        if (currentCardIndex > 0) {
+            setIsFlipped(false);
+            const prevCard = shuffledCards[currentCardIndex - 1];
+            setKnownCards(prev => prev.filter(c => c._id !== prevCard._id));
+            setReviewLaterCards(prev => prev.filter(c => c._id !== prevCard._id));
+            setCurrentCardIndex(prev => prev - 1);
+        }
+    }, [currentCardIndex, shuffledCards]);
+
     const handleKeyDown = useCallback((e) => {
         if (!selectedSet || sessionFinished) return;
         if (e.key === 'ArrowRight') handleNextCard(true);
         if (e.key === 'ArrowLeft') handlePrevCard();
         if (e.key === ' ') { e.preventDefault(); setIsFlipped(f => !f); }
-    }, [selectedSet, sessionFinished, currentCardIndex, shuffledCards]);
+    }, [selectedSet, sessionFinished, handleNextCard, handlePrevCard]);
 
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
@@ -93,42 +129,6 @@ export const FlashcardsPage = ({ onBack }) => {
             await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3001'}/api/flashcard-sets/${setId}`, { method: 'DELETE', headers: { 'x-auth-token': localStorage.getItem('token') } });
             setSets(sets.filter(set => set._id !== setId));
         } catch (err) { setError(err.message); }
-    };
-
-    const shuffleArray = (array) => [...array].sort(() => Math.random() - 0.5);
-
-    const handleSelectSet = (set, restart = false) => {
-        const cardsToStudy = restart && reviewLaterCards.length > 0 ? [...reviewLaterCards] : shuffleArray(set.cards);
-        setSelectedSet(set);
-        setShuffledCards(cardsToStudy);
-        setCurrentCardIndex(0);
-        setIsFlipped(false);
-        setKnownCards([]);
-        setReviewLaterCards([]);
-        setSessionFinished(false);
-    };
-
-    const handleNextCard = (isKnown) => {
-        const currentCard = shuffledCards[currentCardIndex];
-        if (isKnown) setKnownCards(prev => [...prev, currentCard]);
-        else setReviewLaterCards(prev => [...prev, currentCard]);
-        
-        setIsFlipped(false);
-        if (currentCardIndex < shuffledCards.length - 1) {
-            setCurrentCardIndex(prev => prev + 1);
-        } else {
-            setSessionFinished(true);
-        }
-    };
-
-    const handlePrevCard = () => {
-        if (currentCardIndex > 0) {
-            setIsFlipped(false);
-            const prevCard = shuffledCards[currentCardIndex - 1];
-            setKnownCards(prev => prev.filter(c => c._id !== prevCard._id));
-            setReviewLaterCards(prev => prev.filter(c => c._id !== prevCard._id));
-            setCurrentCardIndex(prev => prev - 1);
-        }
     };
 
     const card = useMemo(() => shuffledCards[currentCardIndex], [currentCardIndex, shuffledCards]);

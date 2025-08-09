@@ -1,5 +1,4 @@
 import React from 'react';
-import { Icon } from './Icon';
 
 const FeatureCard = ({ title, description, onClick }) => (
     <div onClick={onClick} className="bg-white/10 dark:bg-black/50 backdrop-blur-sm p-6 rounded-lg border border-blue-800/30 cursor-pointer transition-all duration-300 hover:border-blue-500 hover:shadow-2xl hover:shadow-blue-900/30 hover:-translate-y-1">

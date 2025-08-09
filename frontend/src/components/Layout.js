@@ -66,9 +66,9 @@ export const Header = ({ onToggleTheme, currentTheme, onHomeClick, onLogout, use
                                         </div>
                                     </div>
 
-                                    <a href="#" onClick={(e) => { e.preventDefault(); onLogout(); setIsDropdownOpen(false); }} className="block w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700">
+                                    <button onClick={() => { onLogout(); setIsDropdownOpen(false); }} className="block w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700">
                                         Logout
-                                    </a>
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -88,17 +88,7 @@ export const Footer = () => (
     </footer>
 );
 
-const GlobalStyles = () => (
-    <style>{`
-        @keyframes fade-in {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-            animation: fade-in 0.2s ease-out forwards;
-        }
-    `}</style>
-);
+// Removed unused GlobalStyles component
 
 export const Chatbot = () => {
     /* Your existing Chatbot code... */

@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import process from 'process';
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage, SignUpPage } from './components/Auth';
 import { FeaturesPage } from './components/Features';
